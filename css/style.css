@@ -277,6 +277,9 @@ body {
 }
 
 /* ---------- 模态框 ---------- */
+/* 注意：CSS 类的 display:flex 会覆盖原生 hidden 属性的 display:none，
+   所以必须显式写 [hidden] 选择器让隐藏生效 */
+.modal-mask[hidden] { display: none !important; }
 .modal-mask {
   position: fixed;
   inset: 0;
