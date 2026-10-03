@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SQL 练习工具</title>
+  <link rel="stylesheet" href="css/style.css">
+
+  <!-- ============================================================
+       Monaco Editor 配置 + loader
+       必须在 loader.js 之前定义 window.MonacoEnvironment 和 require
+       ============================================================ -->
+  <script>
+    // 预配置 Monaco 的 worker 加载方式（用 data: URL 绕过 CORS）
+    window.MonacoEnvironment = {
+      getWorkerUrl: function(workerId, label) {
+        return 'data:text/javascript;charset=utf-8,' + encodeURIComponent(
+          'self.MonacoEnvironment = { baseUrl: "https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/" };' +
+          'importScripts("https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/base/worker/workerMain.js");'
+        );
+      }
+    };
+    // 配置 AMD loader 的模块根路径
+    require = { paths: { 'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs' } };
+  </script>
+  <!-- Monaco loader.js：加载后暴露 AMD require 函数 -->
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
+
+  <!-- sql.js 主包：加载后暴露 window.initSqlJs 函数 -->
+  <script src="https://cdn.jsdelivr.net/npm/sql.js@1.10.3/dist/sql-wasm.js"></script>
+</head>
+<body>
+  <div class="app">
+
+    <!-- 左侧：Schema 面板 -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h3>Schema</h3>
+        <div class="sidebar-actions">
+          <button id="btn-new-table" title="新建表">＋</button>
+          <button id="btn-reset" title="重置数据">↺</button>
+        </div>
+      </div>
+
+      <!-- 状态提示（加载 / 错误） -->
+      <div class="status-bar" id="status-bar">
+        <span id="status-text">加载中...</span>
+      </div>
+
+      <!-- 表/字段树 -->
+      <div class="sidebar-body" id="schema-tree">
+        <!-- JS 动态渲染 -->
+      </div>
+
+      <!-- 已删除折叠区 -->
+      <div class="deleted-section" id="deleted-section" hidden>
+        <button class="deleted-toggle" id="deleted-toggle">
+          <span>已删除 (<span id="deleted-count">0</span>)</span>
+          <span class="chevron">▶</span>
+        </button>
+        <div class="deleted-list" id="deleted-list"></div>
+      </div>
+    </aside>
+
+    <!-- 右侧：主工作区 -->
+    <main class="workspace">
+
+      <!-- 编辑器区 -->
+      <section class="editor-section">
+        <div class="toolbar">
+          <h2>SQL 编辑器</h2>
+          <div class="toolbar-right">
+            <span class="shortcut-hint">Ctrl/Cmd + Enter 运行</span>
+            <button id="btn-run" class="btn-run" disabled>▶ 运行</button>
+          </div>
+        </div>
+        <!-- Monaco 挂载点：必须给确定高度（靠 flex 链） -->
+        <div id="editor-container"></div>
+      </section>
+
+      <!-- 结果区 -->
+      <section class="result-section">
+        <div class="toolbar">
+          <h2>执行结果</h2>
+        </div>
+        <div class="result-body" id="result-body">
+          <div class="empty-hint">等待执行 SQL...</div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ============================================================
+       新建表模态框
+       ============================================================ -->
+  <div class="modal-mask" id="modal-mask" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h3>新建表</h3>
+        <button class="modal-close" id="modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="field">
+          <span>表名</span>
+          <input type="text" id="new-table-name" placeholder="例如: users">
+        </label>
+
+        <div class="field-columns">
+          <div class="columns-header">
+            <span>字段名</span>
+            <span>类型</span>
+            <span>主键</span>
+            <span></span>
+          </div>
+          <div id="new-table-fields">
+            <!-- JS 动态生成字段行 -->
+          </div>
+          <button class="btn-link" id="add-field-row">＋ 添加字段</button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="modal-cancel" class="btn-secondary">取消</button>
+        <button id="modal-confirm" class="btn-primary">创建</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 业务脚本：schema.js 必须先于 main.js -->
+  <script src="js/schema.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
