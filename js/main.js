@@ -24,6 +24,10 @@ let db = null;                 // sql.js Database 实例
 let editor = null;             // Monaco Editor 实例
 let hiddenTables = [];         // 被"假删除"的表名列表
 
+// IndexedDB 的 key 常量（storage.js 里定义了 db 名和 store 名）
+const IDB_KEY_DB = 'db-blob';
+const IDB_KEY_HIDDEN = 'hidden-tables';
+
 // ---------- DOM 元素 ----------
 const $statusBar = document.getElementById('status-bar');
 const $statusText = document.getElementById('status-text');
@@ -60,7 +64,22 @@ function setStatus(text, type) {
 function hideStatus() { $statusBar.classList.add('hidden'); }
 
 // ====================================================================
-// 启动流程：加载 sql.js → 创建库 → 加载 Monaco → 渲染 Schema
+// 持久化：把数据库快照 + hiddenTables 写入 IndexedDB
+// 每次操作成功后必须 await persistAll()，不能 fire-and-forget
+// ====================================================================
+
+async function persistAll() {
+  try {
+    const blob = db.export();       // Uint8Array，IndexedDB 原生支持
+    await set(IDB_KEY_DB, blob);
+    await set(IDB_KEY_HIDDEN, hiddenTables);
+  } catch (e) {
+    console.warn('[storage] 持久化失败:', e);
+  }
+}
+
+// ====================================================================
+// 启动流程：加载 sql.js → 从存档恢复 / 初始化 → 加载 Monaco → 渲染 Schema
 // ====================================================================
 
 async function bootstrap() {
@@ -71,10 +90,25 @@ async function bootstrap() {
       locateFile: file => SQLJS_CDN + file
     });
 
-    // 2) 创建空数据库 + 写入示例数据
-    db = new SQLModule.Database();
-    setStatus('初始化示例数据...', 'loading');
-    initSchema(db);
+    // 2) 尝试从 IndexedDB 读取存档
+    setStatus('读取存档...', 'loading');
+    const savedBlob = await get(IDB_KEY_DB);          // Uint8Array 或 null
+    const savedHidden = await get(IDB_KEY_HIDDEN);    // Array 或 null
+
+    if (savedBlob instanceof Uint8Array && savedBlob.length > 0) {
+      // 有存档 → 恢复数据库 + 恢复 hiddenTables
+      db = new SQLModule.Database(savedBlob);
+      hiddenTables = Array.isArray(savedHidden) ? savedHidden : [];
+      console.log('[SQL] 已从 IndexedDB 恢复数据库');
+    } else {
+      // 无存档 → 创建空库 + 跑示例数据 + 立刻存一份
+      db = new SQLModule.Database();
+      setStatus('初始化示例数据...', 'loading');
+      initSchema(db);
+      hiddenTables = [];
+      await persistAll();
+      console.log('[SQL] 已用示例数据初始化并存档');
+    }
 
     // 3) 加载 Monaco Editor（AMD loader）
     setStatus('加载 Monaco Editor...', 'loading');
@@ -196,9 +230,9 @@ function renderQueryResults(results) {
 
 /**
  * 执行 SQL 总入口
- * 成功后刷新 Schema 面板
+ * 成功后刷新 Schema 面板 + 持久化到 IndexedDB
  */
-function runSQL() {
+async function runSQL() {
   const sql = editor.getValue();   // Monaco 取当前内容
   if (!sql.trim()) return;
 
@@ -212,6 +246,8 @@ function runSQL() {
     }
     // 成功 → 刷新 Schema（新表 / DROP / 改名 都可能影响）
     renderSchema();
+    // 成功 → 立即持久化
+    await persistAll();
   } catch (err) {
     // SQLite 报错原文直接红色显示（不吞掉、不翻译）
     $resultBody.innerHTML =
@@ -331,25 +367,28 @@ function insertSelectIntoEditor(tableName) {
 // 假删除 / 恢复 / 彻底删除
 // ====================================================================
 
-function softDeleteTable(name) {
+async function softDeleteTable(name) {
   if (!hiddenTables.includes(name)) {
     hiddenTables.push(name);
     renderSchema();
+    await persistAll();
   }
 }
 
-function restoreTable(name) {
+async function restoreTable(name) {
   hiddenTables = hiddenTables.filter(n => n !== name);
   renderSchema();
+  await persistAll();
 }
 
-function hardDeleteTable(name) {
+async function hardDeleteTable(name) {
   // 真执行 DROP TABLE（可能之前没被假删除过也可能被隐藏了）
   hiddenTables = hiddenTables.filter(n => n !== name);
   try {
     db.run(`DROP TABLE IF EXISTS "${name}"`);
     renderSchema();
     $resultBody.innerHTML = `<div class="msg-success">✓ 已彻底删除表 ${escapeHTML(name)}</div>`;
+    await persistAll();
   } catch (err) {
     $resultBody.innerHTML = `<div class="msg-error">✗ ${escapeHTML(err.message)}</div>`;
   }
@@ -431,25 +470,27 @@ function openNewTableModal() {
 function closeNewTableModal() { $modalMask.hidden = true; }
 
 // ====================================================================
-// 重置按钮：清空当前库 + 重跑 initSchema + 清 hiddenTables
+// 重置按钮：清空存档 → 重建示例库 + 清空 hiddenTables → 立即存档新状态
 // ====================================================================
 
-function resetAll() {
-  // 关旧库
+async function resetAll() {
+  // 1) 先清 IndexedDB（防止写了新的又被清掉）
+  try {
+    await del(IDB_KEY_DB);
+    await del(IDB_KEY_HIDDEN);
+  } catch (e) {
+    console.warn('[storage] 清存档失败:', e);
+  }
+  // 2) 关旧库
   if (db) db.close();
-  // 用之前缓存的 SQLModule 重建
+  // 3) 重建空库 + 重跑示例数据
   db = new SQLModule.Database();
-  finishReset();
-}
-
-/**
- * 重置后统一收尾：重跑 initSchema + 清 hiddenTables + 渲染
- */
-function finishReset() {
   initSchema(db);
   hiddenTables = [];
+  // 4) 渲染 + 立刻存一份干净的
   renderSchema();
   $resultBody.innerHTML = '<div class="msg-success">✓ 已重置为示例数据</div>';
+  await persistAll();
 }
 
 // ====================================================================
